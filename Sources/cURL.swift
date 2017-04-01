@@ -272,6 +272,10 @@ public class CURL {
         guard let multi = self.multi else {
             return (false, -1, nil, nil)
         }
+		
+		var numfds = Int32()
+		curl_multi_wait(multi, nil, 0, .max, &numfds)
+		
 		var one: Int32 = 0
 		var code = CURLM_OK
 		repeat {
