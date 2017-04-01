@@ -19,7 +19,6 @@
 
 import cURL
 import PerfectThread
-import PerfectNet
 
 /// This class is a wrapper around the CURL library. It permits network operations to be completed using cURL in a block or non-blocking manner.
 public class CURL {
@@ -167,76 +166,6 @@ public class CURL {
 	private class ResponseAccumulator {
 		var header = [UInt8]()
 		var body = [UInt8]()
-	}
-
-	/// Perform the CURL request in a non-blocking manner. The closure will be called with the resulting code, header and body data.
-	public func perform(closure: @escaping (Int, [UInt8], [UInt8]) -> ()) {
-        guard let curl = self.curl else {
-            return closure(-1, [UInt8](), [UInt8]())
-        }
-		let accum = ResponseAccumulator()
-		if nil == self.multi {
-			self.multi = curl_multi_init()
-		}
-		curl_multi_add_handle(multi, curl)
-
-		performInner(accumulator: accum, closure: closure)
-	}
-
-	private func performInner(accumulator: ResponseAccumulator, closure: @escaping (Int, [UInt8], [UInt8]) -> ()) {
-		let perf = self.perform()
-		if let h = perf.2 {
-			_ = accumulator.header.append(contentsOf: h)
-		}
-		if let b = perf.3 {
-			_ = accumulator.body.append(contentsOf: b)
-		}
-		if perf.0 == false { // done
-			closure(perf.1, accumulator.header, accumulator.body)
-		} else {
-			
-			var timeout = 0
-			curl_multi_timeout(self.multi, &timeout)
-			if timeout == 0 {
-				return self.performInner(accumulator: accumulator, closure: closure)
-			}
-			let timeoutSeconds: Double
-			if timeout == -1 {
-				timeoutSeconds = 0.1
-			} else {
-				timeoutSeconds = Double(timeout) / 1000
-			}
-			
-			var fdsRd = fd_set(), fdsWr = fd_set(), fdsEx = fd_set()
-			var fdsZero = fd_set()
-			memset(&fdsZero, 0, MemoryLayout<fd_set>.size)
-			memset(&fdsRd, 0, MemoryLayout<fd_set>.size)
-			memset(&fdsWr, 0, MemoryLayout<fd_set>.size)
-			memset(&fdsEx, 0, MemoryLayout<fd_set>.size)
-			var max = Int32(0)
-			curl_multi_fdset(self.multi, &fdsRd, &fdsWr, &fdsEx, &max)
-			if max == -1 {
-				Threading.dispatch {
-					self.performInner(accumulator: accumulator, closure: closure)
-				}
-			} else if 0 != memcmp(&fdsZero, &fdsRd, MemoryLayout<fd_set>.size) {
-				// wait for read
-				NetEvent.add(socket: max, what: .read, timeoutSeconds: timeoutSeconds) {
-					_, w in
-					self.performInner(accumulator: accumulator, closure: closure)
-				}
-			} else if 0 != memcmp(&fdsZero, &fdsWr, MemoryLayout<fd_set>.size) {
-				// wait for write
-				NetEvent.add(socket: max, what: .write, timeoutSeconds: timeoutSeconds) {
-					_, w in
-					self.performInner(accumulator: accumulator, closure: closure)
-				}
-			} else {
-				Threading.dispatch {
-					self.performInner(accumulator: accumulator, closure: closure)
-				}
-			}
-		}
 	}
 
 	/// Performs the request, blocking the current thread until it completes.
